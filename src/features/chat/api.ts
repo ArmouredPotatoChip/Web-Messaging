@@ -29,7 +29,7 @@ export async function listConversations(myUserId: string): Promise<ConversationS
 
 export async function startConversation(username: string): Promise<string> {
   const { data, error } = await supabase.rpc("create_direct_conversation", {
-    other_username: username.trim().toLowerCase(),
+    other_username: username.trim(),
   });
 
   if (error) throw error;

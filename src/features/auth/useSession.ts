@@ -8,7 +8,7 @@ export function useSession() {
 
     useEffect(() => {
         const unsubscribe = onAuthChange((s) => {
-            setSession(s),
+            setSession(s);
             setLoading(false);
         });
         return unsubscribe;

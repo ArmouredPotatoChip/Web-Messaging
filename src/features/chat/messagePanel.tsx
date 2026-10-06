@@ -9,7 +9,7 @@ type Props = {
 };
 
 export function MessagePanel({ conversationId, myUserId, otherUsername }: Props) {
-  const { messages, error } = useMessages(conversationId);
+  const { messages, error, loading, reload } = useMessages(conversationId);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
@@ -42,7 +42,21 @@ export function MessagePanel({ conversationId, myUserId, otherUsername }: Props)
       <header className="border-b bg-white p-3 font-semibold">{otherUsername}</header>
 
       <div className="flex-1 space-y-2 overflow-y-auto p-4">
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {loading && messages.length === 0 && (
+          <p className="text-sm text-gray-500">Loading messages...</p>
+        )}
+
+        {error && (
+          <div className="rounded border border-red-200 bg-red-50 p-3 text-sm">
+            <p className="font-medium text-red-700">Couldn't load messages</p>
+            <p className="text-red-600">{error.message}</p>
+            {error.retryable && (
+              <button onClick={reload} disabled={loading} className="mt-2 text-red-700 underline disabled:opacity-50">
+                Try again
+              </button>
+            )}
+          </div>
+        )}
 
         {messages.map((m) => {
           const isMine = m.sender_id === myUserId;

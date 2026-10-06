@@ -37,7 +37,7 @@ supabase/.temp/
 supabase/.env
 supabase/functions/.env
 
-# Taur'
+# Tauri
 src-tauri/target/
 src-tauri/gen/schemas/
 *.key
@@ -45,3 +45,6 @@ src-tauri/gen/schemas/
 *.pem
 *.p12
 *.pfx
+
+# Claude
+Claude.md

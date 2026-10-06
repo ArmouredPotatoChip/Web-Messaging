@@ -1,32 +1,45 @@
 import { useState, type FormEvent } from "react";
 import type { ConversationSummary } from "./api";
+import { toAppError, type AppError } from "../../lib/errors";
 
 type Props = {
   conversations: ConversationSummary[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   onStart: (username: string) => Promise<void>;
+  loadError: AppError | null;
+  onRetry: () => void;
 };
 
-export function Sidebar({ conversations, selectedId, onSelect, onStart }: Props) {
+export function Sidebar({ conversations, selectedId, onSelect, onStart, loadError, onRetry }: Props) {
   const [username, setUsername] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<AppError | null>(null);
+  const [inputError, setInputError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    if (!username.trim()) return; // buraya bir geri bildirim verilmesi lağzım
-
+  async function start() {
     setError(null);
+    setInputError(null);
+
+    if (!username.trim()) {
+      setInputError("Enter a username.");
+      return;
+    }
+
     setBusy(true);
     try {
       await onStart(username);
       setUsername("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Sohbet başlatılamadı.");
+      setError(toAppError(err));
     } finally {
       setBusy(false);
     }
+  }
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    start();
   }
 
   return (
@@ -47,13 +60,37 @@ export function Sidebar({ conversations, selectedId, onSelect, onStart }: Props)
             Start Convo
           </button>
         </div>
-        {error && <p className="text-xs text-red-600">{error}</p>}
+        {inputError && <p className="text-xs text-red-600">{inputError}</p>}
+        {error && (
+          <div className="text-xs text-red-600">
+            <p className="font-medium">Couldn't start conversation</p>
+            <p>{error.message}</p>
+            {error.retryable && (
+              <button type="button" onClick={start} disabled={busy} className="underline disabled:opacity-50">
+                Try again
+              </button>
+            )}
+          </div>
+        )}
       </form>
 
       <ul className="flex-1 overflow-y-auto">
-        {conversations.length === 0 && (
-          <li className="p-3 text-sm text-gray-500">No chats yet.</li>
+        {loadError && (
+          <li className="m-3 rounded border border-red-200 bg-red-50 p-3 text-sm">
+            <p className="font-medium text-red-700">Couldn't load conversations</p>
+            <p className="text-red-600">{loadError.message}</p>
+            {loadError.retryable && (
+              <button onClick={onRetry} className="mt-2 text-red-700 underline">
+                Try again
+              </button>
+            )}
+          </li>
         )}
+
+        {!loadError && conversations.length === 0 && (
+          <li className="p-3 text-sm text-gray-500">No conversations yet.</li>
+        )}
+
         {conversations.map((c) => (
           <li key={c.id}>
             <button

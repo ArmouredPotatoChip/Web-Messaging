@@ -6,7 +6,7 @@ import { ChatScreen } from "./features/chat/chatScreen";
 function App() {
   const { session, loading } = useSession();
 
-  if (loading) return <div className="p-4">Yükleniyor...</div>;
+  if (loading) return <div className="p-4">Loading...</div>;
   if (!session) return <AuthScreen />;
 
   return <ChatScreen myUserId={session.user.id} />;

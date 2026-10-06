@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getMessages, subscribeToMessages, type Message } from "./api";
+import { toAppError, type AppError } from "../../lib/errors";
 
 function mergeMessages(current: Message[], incoming: Message[]): Message[] {
   const byId = new Map(current.map((m) => [m.id, m]));
@@ -13,8 +14,12 @@ function mergeMessages(current: Message[], incoming: Message[]): Message[] {
 
 export function useMessages(conversationId: string) {
   const [messages, setMessages] = useState<Message[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<AppError | null>(null);
+  const [loading, setLoading] = useState(true);
+  // Bumped by "Try again" to re-run the history load without touching the subscription.
+  const [attempt, setAttempt] = useState(0);
 
+  // Realtime: new messages arrive over the WebSocket.
   useEffect(() => {
     let cancelled = false;
 
@@ -23,6 +28,18 @@ export function useMessages(conversationId: string) {
         setMessages((prev) => mergeMessages(prev, [message]));
       }
     });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [conversationId]);
+
+  // History: loaded over HTTP, again on every retry.
+  useEffect(() => {
+    let cancelled = false;
+
+    setLoading(true);
+    setError(null);
     getMessages(conversationId)
       .then((history) => {
         if (!cancelled) {
@@ -31,14 +48,22 @@ export function useMessages(conversationId: string) {
       })
       .catch((err) => {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Could not load messages.");
+          setError(toAppError(err));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
         }
       });
     return () => {
       cancelled = true;
-      unsubscribe();
     };
-  }, [conversationId]);
+  }, [conversationId, attempt]);
 
-  return { messages, error };
+  const reload = useCallback(() => {
+    setAttempt((n) => n + 1);
+  }, []);
+
+  return { messages, error, loading, reload };
 }
