@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { sendMessages } from "./api";
 import { useMessages } from "./useMessages";
-import { toAppError, type AppError } from "../../lib/errors";
 
 type Props = {
   conversationId: string;
@@ -10,10 +8,8 @@ type Props = {
 };
 
 export function MessagePanel({ conversationId, myUserId, otherUsername }: Props) {
-  const { messages, error, loading, reload } = useMessages(conversationId);
+  const { messages, error, loading, reload, send, retry } = useMessages(conversationId, myUserId);
   const [text, setText] = useState("");
-  const [sending, setSending] = useState(false);
-  const [sendError, setSendError] = useState<AppError | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Scroll to the newest message whenever the list changes.
@@ -21,25 +17,14 @@ export function MessagePanel({ conversationId, myUserId, otherUsername }: Props)
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  async function send() {
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
     const content = text.trim();
     if (!content) return;
 
-    setSending(true);
-    setSendError(null);
-    try {
-      await sendMessages(conversationId, myUserId, content);
-      setText("");
-    } catch (err) {
-      setSendError(toAppError(err));
-    } finally {
-      setSending(false);
-    }
-  }
-
-  function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    send();
+    // The message shows up right away as "sending"; its status lives in useMessages.
+    send(content);
+    setText("");
   }
 
   return (
@@ -66,20 +51,34 @@ export function MessagePanel({ conversationId, myUserId, otherUsername }: Props)
         {messages.map((m) => {
           const isMine = m.sender_id === myUserId;
           return (
-            <div key={m.id} className={`flex ${isMine ? "justify-end" : "justify-start"}`}>
+            <div key={m.id} className={`flex flex-col ${isMine ? "items-end" : "items-start"}`}>
               <div
                 className={`max-w-[70%] rounded-lg px-3 py-2 text-sm ${
                   isMine ? "bg-blue-600 text-white" : "bg-white shadow"
-                }`}
+                } ${m.status === "sent" ? "" : "opacity-70"}`}
               >
                 <p className="whitespace-pre-wrap break-words">{m.content}</p>
                 <p className={`mt-1 text-[10px] ${isMine ? "text-blue-100" : "text-gray-400"}`}>
-                  {new Date(m.created_at).toLocaleTimeString([], {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
+                  {m.status === "sending" && "Sending..."}
+                  {m.status === "failed" && "Not sent"}
+                  {m.status === "sent" &&
+                    new Date(m.created_at).toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
                 </p>
               </div>
+              {m.status === "failed" && (
+                <div className="mt-1 max-w-[70%] text-right text-xs text-red-600">
+                  <p className="font-medium">Couldn't send</p>
+                  <p>{m.error?.message}</p>
+                  {m.error?.retryable && (
+                    <button type="button" onClick={() => retry(m)} className="underline">
+                      Retry
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           );
         })}
@@ -88,17 +87,6 @@ export function MessagePanel({ conversationId, myUserId, otherUsername }: Props)
       </div>
 
       <form onSubmit={handleSubmit} className="border-t bg-white p-3">
-        {sendError && (
-          <div className="mb-2 text-xs text-red-600">
-            <p className="font-medium">Couldn't send message</p>
-            <p>{sendError.message}</p>
-            {sendError.retryable && (
-              <button type="button" onClick={send} disabled={sending} className="underline disabled:opacity-50">
-                Try again
-              </button>
-            )}
-          </div>
-        )}
         <div className="flex gap-2">
           <input
             className="flex-1 rounded border p-2 text-sm"
@@ -109,7 +97,7 @@ export function MessagePanel({ conversationId, myUserId, otherUsername }: Props)
           />
           <button
             type="submit"
-            disabled={sending || !text.trim()}
+            disabled={!text.trim()}
             className="rounded bg-blue-600 px-4 text-sm text-white disabled:opacity-50"
           >
             Send

@@ -1,31 +1,45 @@
-import { useCallback, useEffect, useState } from "react";
-import { getMessages, subscribeToMessages, type Message } from "./api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { getMessages, sendMessages, subscribeToMessages, type Message } from "./api";
 import { toAppError, type AppError } from "../../lib/errors";
 
-function mergeMessages(current: Message[], incoming: Message[]): Message[] {
+// status and error exist only in client state, never in the database.
+export type ChatMessage = Message & {
+  status: "sent" | "sending" | "failed";
+  error?: AppError;
+};
+
+function toSent(message: Message): ChatMessage {
+  return { ...message, status: "sent" };
+}
+
+function mergeMessages(current: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] {
   const byId = new Map(current.map((m) => [m.id, m]));
   for (const m of incoming) {
     byId.set(m.id, m);
   }
-  return [...byId.values()].sort(
-    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-  );
+  
+  return [...byId.values()].sort((a, b) => {
+    const aPending = a.status !== "sent";
+    const bPending = b.status !== "sent";
+    if (aPending !== bPending) return aPending ? 1 : -1;
+    return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+  });
 }
 
-export function useMessages(conversationId: string) {
-  const [messages, setMessages] = useState<Message[]>([]);
+export function useMessages(conversationId: string, myUserId: string) {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [error, setError] = useState<AppError | null>(null);
   const [loading, setLoading] = useState(true);
-  // Bumped by "Try again" to re-run the history load without touching the subscription.
   const [attempt, setAttempt] = useState(0);
+  // Tail of the send queue: each send starts only after the previous one settled.
+  const chainRef = useRef<Promise<void>>(Promise.resolve());
 
-  // Realtime: new messages arrive over the WebSocket.
   useEffect(() => {
     let cancelled = false;
 
     const unsubscribe = subscribeToMessages(conversationId, (message) => {
       if (!cancelled) {
-        setMessages((prev) => mergeMessages(prev, [message]));
+        setMessages((prev) => mergeMessages(prev, [toSent(message)]));
       }
     });
     return () => {
@@ -34,7 +48,6 @@ export function useMessages(conversationId: string) {
     };
   }, [conversationId]);
 
-  // History: loaded over HTTP, again on every retry.
   useEffect(() => {
     let cancelled = false;
 
@@ -43,7 +56,7 @@ export function useMessages(conversationId: string) {
     getMessages(conversationId)
       .then((history) => {
         if (!cancelled) {
-          setMessages((prev) => mergeMessages(prev, history));
+          setMessages((prev) => mergeMessages(prev, history.map(toSent)));
         }
       })
       .catch((err) => {
@@ -65,5 +78,64 @@ export function useMessages(conversationId: string) {
     setAttempt((n) => n + 1);
   }, []);
 
-  return { messages, error, loading, reload };
+  const deliver = useCallback(
+    async (id: string, content: string) => {
+      try {
+        const result = await sendMessages(id, conversationId, myUserId, content);
+        if (result === "already_stored") {
+          const latest = await getMessages(conversationId);
+          setMessages((prev) => mergeMessages(prev, latest.map(toSent)));
+        }
+      } catch (err) {
+        const appError = toAppError(err);
+        setMessages((prev) =>
+          prev.map((m): ChatMessage =>
+            m.id === id && m.status === "sending" ? { ...m, status: "failed", error: appError } : m
+          )
+        );
+      }
+    },
+    [conversationId, myUserId]
+  );
+
+  const enqueue = useCallback(
+    (id: string, content: string) => {
+      chainRef.current = chainRef.current
+        .then(() => deliver(id, content))
+        .catch((err) => console.error("send chain:", err));
+    },
+    [deliver]
+  );
+
+  const send = useCallback(
+    (content: string) => {
+      const local: ChatMessage = {
+        id: crypto.randomUUID(),
+        conversation_id: conversationId,
+        sender_id: myUserId,
+        content,
+        created_at: new Date().toISOString(),
+        status: "sending",
+      };
+      setMessages((prev) => mergeMessages(prev, [local]));
+      enqueue(local.id, content);
+    },
+    [conversationId, myUserId, enqueue]
+  );
+
+  const retry = useCallback(
+    (message: ChatMessage) => {
+      const again: ChatMessage = {
+        ...message,
+        status: "sending",
+        error: undefined,
+        created_at: new Date().toISOString(),
+      };
+      setMessages((prev) => mergeMessages(prev, [again]));
+      enqueue(message.id, message.content);
+    },
+    [enqueue]
+  );
+
+  return { messages, error, loading, reload, send, retry };
 }
