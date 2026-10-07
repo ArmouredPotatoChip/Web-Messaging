@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { sendMessages } from "./api";
 import { useMessages } from "./useMessages";
+import { toAppError, type AppError } from "../../lib/errors";
 
 type Props = {
   conversationId: string;
@@ -12,7 +13,7 @@ export function MessagePanel({ conversationId, myUserId, otherUsername }: Props)
   const { messages, error, loading, reload } = useMessages(conversationId);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
-  const [sendError, setSendError] = useState<string | null>(null);
+  const [sendError, setSendError] = useState<AppError | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Scroll to the newest message whenever the list changes.
@@ -20,8 +21,7 @@ export function MessagePanel({ conversationId, myUserId, otherUsername }: Props)
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
+  async function send() {
     const content = text.trim();
     if (!content) return;
 
@@ -31,10 +31,15 @@ export function MessagePanel({ conversationId, myUserId, otherUsername }: Props)
       await sendMessages(conversationId, myUserId, content);
       setText("");
     } catch (err) {
-      setSendError(err instanceof Error ? err.message : "Could not send message.");
+      setSendError(toAppError(err));
     } finally {
       setSending(false);
     }
+  }
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    send();
   }
 
   return (
@@ -83,7 +88,17 @@ export function MessagePanel({ conversationId, myUserId, otherUsername }: Props)
       </div>
 
       <form onSubmit={handleSubmit} className="border-t bg-white p-3">
-        {sendError && <p className="mb-2 text-xs text-red-600">{sendError}</p>}
+        {sendError && (
+          <div className="mb-2 text-xs text-red-600">
+            <p className="font-medium">Couldn't send message</p>
+            <p>{sendError.message}</p>
+            {sendError.retryable && (
+              <button type="button" onClick={send} disabled={sending} className="underline disabled:opacity-50">
+                Try again
+              </button>
+            )}
+          </div>
+        )}
         <div className="flex gap-2">
           <input
             className="flex-1 rounded border p-2 text-sm"

@@ -22,7 +22,7 @@ export async function listConversations(myUserId: string): Promise<ConversationS
         const other = c.conversation_members.find((m) => m.user_id !== myUserId);
         return{
             id: c.id,
-            otherUsername: other?.profiles?.username ?? "unkown",
+            otherUsername: other?.profiles?.username ?? "unknown",
         };
     });
 }

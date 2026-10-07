@@ -8,10 +8,11 @@ type Props = {
   onSelect: (id: string) => void;
   onStart: (username: string) => Promise<void>;
   loadError: AppError | null;
+  loading: boolean;
   onRetry: () => void;
 };
 
-export function Sidebar({ conversations, selectedId, onSelect, onStart, loadError, onRetry }: Props) {
+export function Sidebar({ conversations, selectedId, onSelect, onStart, loadError, loading, onRetry }: Props) {
   const [username, setUsername] = useState("");
   const [error, setError] = useState<AppError | null>(null);
   const [inputError, setInputError] = useState<string | null>(null);
@@ -80,14 +81,18 @@ export function Sidebar({ conversations, selectedId, onSelect, onStart, loadErro
             <p className="font-medium text-red-700">Couldn't load conversations</p>
             <p className="text-red-600">{loadError.message}</p>
             {loadError.retryable && (
-              <button onClick={onRetry} className="mt-2 text-red-700 underline">
+              <button onClick={onRetry} disabled={loading} className="mt-2 text-red-700 underline disabled:opacity-50">
                 Try again
               </button>
             )}
           </li>
         )}
 
-        {!loadError && conversations.length === 0 && (
+        {!loadError && loading && conversations.length === 0 && (
+          <li className="p-3 text-sm text-gray-500">Loading conversations...</li>
+        )}
+
+        {!loadError && !loading && conversations.length === 0 && (
           <li className="p-3 text-sm text-gray-500">No conversations yet.</li>
         )}
 
