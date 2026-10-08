@@ -1,5 +1,8 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { useMessages } from "./useMessages";
+
+const AT_BOTTOM_PX = 40;
+const LOAD_OLDER_WITHIN_PX = 200;
 
 type Props = {
   conversationId: string;
@@ -8,21 +11,67 @@ type Props = {
 };
 
 export function MessagePanel({ conversationId, myUserId, otherUsername }: Props) {
-  const { messages, error, loading, reconnecting, reload, send, retry } = useMessages(conversationId, myUserId);
+  const { messages, error, loading, reconnecting, loadingOlder, olderError, reload, loadOlder, send, retry } =
+    useMessages(conversationId, myUserId);
   const [text, setText] = useState("");
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const prevLastIdRef = useRef<string | undefined>(undefined);
+  const prevFirstIdRef = useRef<string | undefined>(undefined);
+  // Measured from the bottom, because that distance survives messages being added above.
+  const fromBottomRef = useRef(0);
 
-  // Scroll to the newest message whenever the list changes.
+  function handleScroll() {
+    const el = listRef.current;
+    if (!el) return;
+    fromBottomRef.current = el.scrollHeight - el.scrollTop;
+    // After a failed load, only "Try again" retries.
+    if (el.scrollTop < LOAD_OLDER_WITHIN_PX && !olderError) {
+      loadOlder();
+    }
+  }
+
+  // Before paint, so a corrected position is never seen as a jump.
+  useLayoutEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+
+    const first = messages[0];
+    const last = messages[messages.length - 1];
+    const wasEmpty = prevLastIdRef.current === undefined;
+    const sentByMe = last?.id !== prevLastIdRef.current && last?.sender_id === myUserId;
+    const prepended = first?.id !== prevFirstIdRef.current;
+    prevLastIdRef.current = last?.id;
+    prevFirstIdRef.current = first?.id;
+
+    const wasAtBottom = fromBottomRef.current - el.clientHeight < AT_BOTTOM_PX;
+
+    if (sentByMe || wasAtBottom) {
+      // Smooth only from the bottom: a long smooth scroll would pass through the load zone.
+      el.scrollTo({ top: el.scrollHeight, behavior: wasAtBottom && !wasEmpty ? "smooth" : "auto" });
+      fromBottomRef.current = el.clientHeight;
+      return;
+    }
+    if (prepended) {
+      el.scrollTop = el.scrollHeight - fromBottomRef.current;
+    }
+    // A message added below changes the height without a scroll event.
+    fromBottomRef.current = el.scrollHeight - el.scrollTop;
+  }, [messages, myUserId]);
+
+  // A page that does not fill the panel produces no scroll event.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    const el = listRef.current;
+    if (el && el.scrollTop < LOAD_OLDER_WITHIN_PX && !olderError) {
+      loadOlder();
+    }
+  }, [messages, olderError, loadOlder]);
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
     const content = text.trim();
     if (!content) return;
 
-    // The message shows up right away as "sending"; its status lives in useMessages.
+    // No await or catch: send() shows the message at once and tracks its own status.
     send(content);
     setText("");
   }
@@ -35,7 +84,27 @@ export function MessagePanel({ conversationId, myUserId, otherUsername }: Props)
         <p className="border-b bg-amber-50 px-3 py-1 text-xs text-amber-800">Reconnecting...</p>
       )}
 
-      <div className="flex-1 space-y-2 overflow-y-auto p-4">
+      <div
+        ref={listRef}
+        onScroll={handleScroll}
+        className="flex-1 space-y-2 overflow-y-auto p-4 [overflow-anchor:none]"
+      >
+        <p className="h-5 text-center text-xs text-gray-500">
+          {loadingOlder && "Loading older messages..."}
+        </p>
+
+        {olderError && (
+          <div className="rounded border border-red-200 bg-red-50 p-3 text-sm">
+            <p className="font-medium text-red-700">Couldn't load older messages</p>
+            <p className="text-red-600">{olderError.message}</p>
+            {olderError.retryable && (
+              <button onClick={loadOlder} disabled={loadingOlder} className="mt-2 text-red-700 underline disabled:opacity-50">
+                Try again
+              </button>
+            )}
+          </div>
+        )}
+
         {loading && messages.length === 0 && (
           <p className="text-sm text-gray-500">Loading messages...</p>
         )}
@@ -86,8 +155,6 @@ export function MessagePanel({ conversationId, myUserId, otherUsername }: Props)
             </div>
           );
         })}
-
-        <div ref={bottomRef} />
       </div>
 
       <form onSubmit={handleSubmit} className="border-t bg-white p-3">

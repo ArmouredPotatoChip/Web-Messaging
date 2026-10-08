@@ -6,7 +6,6 @@ export function useConversations(myUserId: string) {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [error, setError] = useState<AppError | null>(null);
   const [loading, setLoading] = useState(true);
-  // "connecting" is the first join; "reconnecting" means the channel dropped.
   const [connection, setConnection] = useState<"connecting" | "live" | "reconnecting">("connecting");
 
   const reload = useCallback(async () => {

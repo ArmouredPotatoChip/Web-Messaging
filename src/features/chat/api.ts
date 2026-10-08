@@ -36,12 +36,20 @@ export async function startConversation(username: string): Promise<string> {
   return data;
 }
 
-export async function getMessages(conversationId: string): Promise<Message[]> {
-    const { data, error } = await supabase
+// The cursor row is included: rows sharing its timestamp would be skipped otherwise.
+export async function getMessagesBefore(conversationId: string, before?: string): Promise<Message[]> {
+    let query = supabase
         .from("messages")
         .select("*")
-        .eq("conversation_id", conversationId)
+        .eq("conversation_id", conversationId);
+
+    if (before) {
+        query = query.lte("created_at", before);
+    }
+
+    const { data, error } = await query
         .order("created_at", {ascending: false})
+        .order("id", {ascending: false})
         .limit(MESSAGE_LIMIT);
 
     if (error) throw error;
@@ -49,7 +57,7 @@ export async function getMessages(conversationId: string): Promise<Message[]> {
     return data.reverse();
 }
 
-// One page of messages from `after` onwards (cursor included), oldest to newest.
+// The cursor row is included: rows sharing its timestamp would be skipped otherwise.
 export async function getMessagesAfter(conversationId: string, after: string): Promise<Message[]> {
     const { data, error } = await supabase
         .from("messages")
@@ -92,8 +100,7 @@ export function subscribeToMessages(
 ): () => void {
   const channel = supabase
     .channel(`messages:${conversationId}`, {
-      // Hold SUBSCRIBED until the server is really streaming changes, so the
-      // catch-up that follows cannot run too early.
+      // Holds SUBSCRIBED until the server is streaming, so the catch-up cannot run too early.
       config: { postgres_changes_options: { wait: true } },
     })
     .on(
@@ -106,7 +113,6 @@ export function subscribeToMessages(
       },
       (payload) => onNewMessage(payload.new as Message)
     )
-    // Fires on the first join and again on every rejoin after a dropped connection.
     .subscribe((status) => onStatus(status === "SUBSCRIBED"));
 
   return () => {

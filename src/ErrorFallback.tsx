@@ -1,6 +1,4 @@
-// Shown by react-error-boundary when a component throws while rendering.
-// The app tree is already gone at this point, so the dialog sits over an empty page.
-// A full reload is the safe restart; the saved session keeps the user signed in.
+// The app tree is gone when this renders, so a full reload is the only safe restart.
 export function ErrorFallback() {
   return (
     <div className="fixed inset-0 flex items-center justify-center bg-black/40">
