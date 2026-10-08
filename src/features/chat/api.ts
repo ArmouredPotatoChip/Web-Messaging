@@ -70,7 +70,8 @@ export async function sendMessages(
 
 export function subscribeToMessages(
   conversationId: string,
-  onNewMessage: (message: Message) => void
+  onNewMessage: (message: Message) => void,
+  onStatus: (subscribed: boolean) => void
 ): () => void {
   const channel = supabase
     .channel(`messages:${conversationId}`)
@@ -84,7 +85,8 @@ export function subscribeToMessages(
       },
       (payload) => onNewMessage(payload.new as Message)
     )
-    .subscribe();
+    // Fires on the first join and again on every rejoin after a dropped connection.
+    .subscribe((status) => onStatus(status === "SUBSCRIBED"));
 
   return () => {
     supabase.removeChannel(channel);
@@ -92,7 +94,8 @@ export function subscribeToMessages(
 }
 
 export function subscribeToNewConversations( myUserId: string,
-  onNewConversation: () => void
+  onNewConversation: () => void,
+  onStatus: (subscribed: boolean) => void
 ): () => void {
   const channel = supabase
     .channel(`conversation_members:${myUserId}`)
@@ -106,7 +109,7 @@ export function subscribeToNewConversations( myUserId: string,
       },
       () => onNewConversation()
     )
-    .subscribe();
+    .subscribe((status) => onStatus(status === "SUBSCRIBED"));
 
   return () => {
     supabase.removeChannel(channel);

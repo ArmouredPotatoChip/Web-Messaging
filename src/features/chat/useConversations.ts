@@ -6,6 +6,8 @@ export function useConversations(myUserId: string) {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [error, setError] = useState<AppError | null>(null);
   const [loading, setLoading] = useState(true);
+  // "connecting" is the first join; "reconnecting" means the channel dropped.
+  const [connection, setConnection] = useState<"connecting" | "live" | "reconnecting">("connecting");
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -24,11 +26,29 @@ export function useConversations(myUserId: string) {
   }, [reload]);
 
   useEffect(() => {
-    const unsubscribe = subscribeToNewConversations(myUserId, () => {
-      reload();
-    });
-    return unsubscribe;
+    let cancelled = false;
+
+    const unsubscribe = subscribeToNewConversations(
+      myUserId,
+      () => {
+        reload();
+      },
+      (subscribed) => {
+        // Removing the channel in cleanup reports "not subscribed" too.
+        if (!cancelled) {
+          setConnection(subscribed ? "live" : "reconnecting");
+          // Events missed while disconnected are not replayed, so refetch the list.
+          if (subscribed) {
+            reload();
+          }
+        }
+      }
+    );
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
   }, [myUserId, reload]);
 
-  return { conversations, error, loading, reload };
+  return { conversations, error, loading, reconnecting: connection === "reconnecting", reload };
 }

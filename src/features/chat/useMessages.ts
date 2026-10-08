@@ -31,17 +31,27 @@ export function useMessages(conversationId: string, myUserId: string) {
   const [error, setError] = useState<AppError | null>(null);
   const [loading, setLoading] = useState(true);
   const [attempt, setAttempt] = useState(0);
-  // Tail of the send queue: each send starts only after the previous one settled.
+  // "connecting" is the first join; "reconnecting" means the channel dropped.
+  const [connection, setConnection] = useState<"connecting" | "live" | "reconnecting">("connecting");
   const chainRef = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
     let cancelled = false;
 
-    const unsubscribe = subscribeToMessages(conversationId, (message) => {
-      if (!cancelled) {
-        setMessages((prev) => mergeMessages(prev, [toSent(message)]));
+    const unsubscribe = subscribeToMessages(
+      conversationId,
+      (message) => {
+        if (!cancelled) {
+          setMessages((prev) => mergeMessages(prev, [toSent(message)]));
+        }
+      },
+      (subscribed) => {
+        // Removing the channel in cleanup reports "not subscribed" too.
+        if (!cancelled) {
+          setConnection(subscribed ? "live" : "reconnecting");
+        }
       }
-    });
+    );
     return () => {
       cancelled = true;
       unsubscribe();
@@ -137,5 +147,5 @@ export function useMessages(conversationId: string, myUserId: string) {
     [enqueue]
   );
 
-  return { messages, error, loading, reload, send, retry };
+  return { messages, error, loading, reconnecting: connection === "reconnecting", reload, send, retry };
 }

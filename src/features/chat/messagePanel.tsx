@@ -8,7 +8,7 @@ type Props = {
 };
 
 export function MessagePanel({ conversationId, myUserId, otherUsername }: Props) {
-  const { messages, error, loading, reload, send, retry } = useMessages(conversationId, myUserId);
+  const { messages, error, loading, reconnecting, reload, send, retry } = useMessages(conversationId, myUserId);
   const [text, setText] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -30,6 +30,10 @@ export function MessagePanel({ conversationId, myUserId, otherUsername }: Props)
   return (
     <section className="flex flex-1 flex-col">
       <header className="border-b bg-white p-3 font-semibold">{otherUsername}</header>
+
+      {reconnecting && (
+        <p className="border-b bg-amber-50 px-3 py-1 text-xs text-amber-800">Reconnecting...</p>
+      )}
 
       <div className="flex-1 space-y-2 overflow-y-auto p-4">
         {loading && messages.length === 0 && (

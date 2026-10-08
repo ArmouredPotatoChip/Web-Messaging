@@ -11,7 +11,7 @@ type Props = {
 };
 
 export function ChatScreen({ myUserId }: Props) {
-  const { conversations, error, loading, reload } = useConversations(myUserId);
+  const { conversations, error, loading, reconnecting, reload } = useConversations(myUserId);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState<AppError | null>(null);
@@ -46,6 +46,7 @@ const selected = conversations.find((c) => c.id === selectedId) ?? null;
           onStart={handleStart}
           loadError={error}
           loading={loading}
+          reconnecting={reconnecting}
           onRetry={reload}
         />
         {signOutError && (

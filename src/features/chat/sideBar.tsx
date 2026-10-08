@@ -9,10 +9,11 @@ type Props = {
   onStart: (username: string) => Promise<void>;
   loadError: AppError | null;
   loading: boolean;
+  reconnecting: boolean;
   onRetry: () => void;
 };
 
-export function Sidebar({ conversations, selectedId, onSelect, onStart, loadError, loading, onRetry }: Props) {
+export function Sidebar({ conversations, selectedId, onSelect, onStart, loadError, loading, reconnecting, onRetry }: Props) {
   const [username, setUsername] = useState("");
   const [error, setError] = useState<AppError | null>(null);
   const [inputError, setInputError] = useState<string | null>(null);
@@ -74,6 +75,10 @@ export function Sidebar({ conversations, selectedId, onSelect, onStart, loadErro
           </div>
         )}
       </form>
+
+      {reconnecting && (
+        <p className="border-b bg-amber-50 px-3 py-1 text-xs text-amber-800">Reconnecting...</p>
+      )}
 
       <ul className="flex-1 overflow-y-auto">
         {loadError && (
