@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getMessages, sendMessages, subscribeToMessages, type Message } from "./api";
+import {
+  getMessages,
+  getMessagesAfter,
+  MESSAGE_LIMIT,
+  sendMessages,
+  subscribeToMessages,
+  type Message,
+} from "./api";
 import { toAppError, type AppError } from "../../lib/errors";
 
 // status and error exist only in client state, never in the database.
@@ -26,6 +33,20 @@ function mergeMessages(current: ChatMessage[], incoming: ChatMessage[]): ChatMes
   });
 }
 
+// Catch-up starts this far before the cursor: created_at is taken when an insert
+// starts, so a row can become visible with a slightly older timestamp.
+const CATCH_UP_OVERLAP_MS = 30_000;
+const CATCH_UP_MAX_PAGES = 5;
+
+// The catch-up cursor. Local messages are skipped: their created_at is the client clock.
+function newestConfirmedAt(messages: ChatMessage[]): string | null {
+  // mergeMessages keeps confirmed messages first, oldest to newest.
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].status === "sent") return messages[i].created_at;
+  }
+  return null;
+}
+
 export function useMessages(conversationId: string, myUserId: string) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [error, setError] = useState<AppError | null>(null);
@@ -34,9 +55,68 @@ export function useMessages(conversationId: string, myUserId: string) {
   // "connecting" is the first join; "reconnecting" means the channel dropped.
   const [connection, setConnection] = useState<"connecting" | "live" | "reconnecting">("connecting");
   const chainRef = useRef<Promise<void>>(Promise.resolve());
+  // Latest list, for callbacks that must not re-run on every new message.
+  const messagesRef = useRef<ChatMessage[]>([]);
+  // True once the history load has succeeded; before that there is nothing to catch up from.
+  const loadedRef = useRef(false);
+  // Bumped by every resync, drop and unmount, so an older catch-up loop stops.
+  const syncIdRef = useRef(0);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  // Resync over HTTP: catch up from the newest confirmed message, or load the
+  // latest page when there is nothing to catch up from.
+  const reload = useCallback(async () => {
+    const syncId = ++syncIdRef.current;
+    const cursor = newestConfirmedAt(messagesRef.current);
+
+    if (!cursor || !loadedRef.current) {
+      setAttempt((n) => n + 1);
+      return;
+    }
+
+    setError(null);
+    let after = new Date(new Date(cursor).getTime() - CATCH_UP_OVERLAP_MS).toISOString();
+    let lastId: string | null = null;
+    try {
+      for (let page = 0; page < CATCH_UP_MAX_PAGES; page++) {
+        const batch = await getMessagesAfter(conversationId, after);
+        if (syncIdRef.current !== syncId) return;
+        setMessages((prev) => mergeMessages(prev, batch.map(toSent)));
+        // A short page means we reached the newest message.
+        if (batch.length < MESSAGE_LIMIT) return;
+
+        const last = batch[batch.length - 1];
+        // Same last row twice = no progress (a full page sharing one timestamp).
+        if (last.id === lastId) break;
+        lastId = last.id;
+        // The raw server string keeps microseconds; a Date round-trip would drop them.
+        after = last.created_at;
+      }
+
+      // Too far behind: restart from the latest page. Drop only confirmed messages
+      // older than that page; newer ones arrived live while it was loading.
+      const latest = await getMessages(conversationId);
+      if (syncIdRef.current !== syncId || latest.length === 0) return;
+      const oldestKept = new Date(latest[0].created_at).getTime();
+      setMessages((prev) =>
+        mergeMessages(
+          prev.filter((m) => m.status !== "sent" || new Date(m.created_at).getTime() >= oldestKept),
+          latest.map(toSent)
+        )
+      );
+    } catch (err) {
+      if (syncIdRef.current === syncId) {
+        setError(toAppError(err));
+      }
+    }
+  }, [conversationId]);
 
   useEffect(() => {
     let cancelled = false;
+    let subscribed = false;
 
     const unsubscribe = subscribeToMessages(
       conversationId,
@@ -45,18 +125,31 @@ export function useMessages(conversationId: string, myUserId: string) {
           setMessages((prev) => mergeMessages(prev, [toSent(message)]));
         }
       },
-      (subscribed) => {
+      (isSubscribed) => {
         // Removing the channel in cleanup reports "not subscribed" too.
-        if (!cancelled) {
-          setConnection(subscribed ? "live" : "reconnecting");
+        if (cancelled) return;
+        subscribed = isSubscribed;
+
+        if (!isSubscribed) {
+          syncIdRef.current++;
+          setConnection("reconnecting");
+          return;
         }
+        // Events missed while disconnected are not replayed. The banner stays
+        // until the catch-up has settled.
+        reload().finally(() => {
+          if (!cancelled && subscribed) {
+            setConnection("live");
+          }
+        });
       }
     );
     return () => {
       cancelled = true;
+      syncIdRef.current++;
       unsubscribe();
     };
-  }, [conversationId]);
+  }, [conversationId, reload]);
 
   useEffect(() => {
     let cancelled = false;
@@ -66,6 +159,7 @@ export function useMessages(conversationId: string, myUserId: string) {
     getMessages(conversationId)
       .then((history) => {
         if (!cancelled) {
+          loadedRef.current = true;
           setMessages((prev) => mergeMessages(prev, history.map(toSent)));
         }
       })
@@ -83,10 +177,6 @@ export function useMessages(conversationId: string, myUserId: string) {
       cancelled = true;
     };
   }, [conversationId, attempt]);
-
-  const reload = useCallback(() => {
-    setAttempt((n) => n + 1);
-  }, []);
 
   const deliver = useCallback(
     async (id: string, content: string) => {

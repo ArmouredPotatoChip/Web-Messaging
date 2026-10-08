@@ -3,7 +3,7 @@ import { Database } from "../../lib/database.types";
 
 export type Message = Database["public"]["Tables"]["messages"]["Row"];
 
-const MESSAGE_LIMIT = 50;
+export const MESSAGE_LIMIT = 50;
 
 export type ConversationSummary = {
     id: string;
@@ -49,6 +49,23 @@ export async function getMessages(conversationId: string): Promise<Message[]> {
     return data.reverse();
 }
 
+// One page of messages from `after` onwards (cursor included), oldest to newest.
+export async function getMessagesAfter(conversationId: string, after: string): Promise<Message[]> {
+    const { data, error } = await supabase
+        .from("messages")
+        .select("*")
+        .eq("conversation_id", conversationId)
+        .gte("created_at", after)
+        .order("created_at", {ascending: true})
+        // Keeps the order stable when two messages share a timestamp.
+        .order("id", {ascending: true})
+        .limit(MESSAGE_LIMIT);
+
+    if (error) throw error;
+
+    return data;
+}
+
 export async function sendMessages(
     id: string,
     conversationId: string,
@@ -74,7 +91,11 @@ export function subscribeToMessages(
   onStatus: (subscribed: boolean) => void
 ): () => void {
   const channel = supabase
-    .channel(`messages:${conversationId}`)
+    .channel(`messages:${conversationId}`, {
+      // Hold SUBSCRIBED until the server is really streaming changes, so the
+      // catch-up that follows cannot run too early.
+      config: { postgres_changes_options: { wait: true } },
+    })
     .on(
       "postgres_changes",
       {
@@ -98,7 +119,9 @@ export function subscribeToNewConversations( myUserId: string,
   onStatus: (subscribed: boolean) => void
 ): () => void {
   const channel = supabase
-    .channel(`conversation_members:${myUserId}`)
+    .channel(`conversation_members:${myUserId}`, {
+      config: { postgres_changes_options: { wait: true } },
+    })
     .on(
       "postgres_changes",
       {
