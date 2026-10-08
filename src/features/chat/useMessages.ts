@@ -55,19 +55,15 @@ export function useMessages(conversationId: string, myUserId: string) {
   // "connecting" is the first join; "reconnecting" means the channel dropped.
   const [connection, setConnection] = useState<"connecting" | "live" | "reconnecting">("connecting");
   const chainRef = useRef<Promise<void>>(Promise.resolve());
-  // Latest list, for callbacks that must not re-run on every new message.
   const messagesRef = useRef<ChatMessage[]>([]);
-  // True once the history load has succeeded; before that there is nothing to catch up from.
   const loadedRef = useRef(false);
-  // Bumped by every resync, drop and unmount, so an older catch-up loop stops.
   const syncIdRef = useRef(0);
+  const prevConnectionRef = useRef(connection);
 
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
 
-  // Resync over HTTP: catch up from the newest confirmed message, or load the
-  // latest page when there is nothing to catch up from.
   const reload = useCallback(async () => {
     const syncId = ++syncIdRef.current;
     const cursor = newestConfirmedAt(messagesRef.current);
@@ -89,15 +85,12 @@ export function useMessages(conversationId: string, myUserId: string) {
         if (batch.length < MESSAGE_LIMIT) return;
 
         const last = batch[batch.length - 1];
-        // Same last row twice = no progress (a full page sharing one timestamp).
         if (last.id === lastId) break;
         lastId = last.id;
-        // The raw server string keeps microseconds; a Date round-trip would drop them.
         after = last.created_at;
       }
 
-      // Too far behind: restart from the latest page. Drop only confirmed messages
-      // older than that page; newer ones arrived live while it was loading.
+      // Too far behind, restart from the latest page
       const latest = await getMessages(conversationId);
       if (syncIdRef.current !== syncId || latest.length === 0) return;
       const oldestKept = new Date(latest[0].created_at).getTime();
@@ -236,6 +229,18 @@ export function useMessages(conversationId: string, myUserId: string) {
     },
     [enqueue]
   );
+
+  useEffect(() => {
+    const wasLive = prevConnectionRef.current === "live";
+    prevConnectionRef.current = connection;
+    if (connection !== "live" || wasLive) return;
+
+    for (const m of messagesRef.current) {
+      if (m.status === "failed" && m.error?.code === "NETWORK") {
+        retry(m);
+      }
+    }
+  }, [connection, retry]);
 
   return { messages, error, loading, reconnecting: connection === "reconnecting", reload, send, retry };
 }
