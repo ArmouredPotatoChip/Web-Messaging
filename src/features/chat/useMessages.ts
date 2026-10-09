@@ -9,10 +9,8 @@ import {
 } from "./api";
 import { toAppError, type AppError } from "../../lib/errors";
 
-export type ChatMessage = Message & {
-  status: "sent" | "sending" | "failed";
-  error?: AppError;
-};
+export type ChatMessage = Message &
+  ({ status: "sent" } | { status: "sending" } | { status: "failed"; error: AppError });
 
 function toSent(message: Message): ChatMessage {
   return { ...message, status: "sent" };
@@ -221,35 +219,24 @@ export function useMessages(conversationId: string, myUserId: string) {
     [deliver]
   );
 
-  const send = useCallback(
-    (content: string) => {
+  const queueSend = useCallback(
+    (id: string, content: string) => {
       const local: ChatMessage = {
-        id: crypto.randomUUID(),
+        id,
+        content,
         conversation_id: conversationId,
         sender_id: myUserId,
-        content,
         created_at: new Date().toISOString(),
         status: "sending",
       };
       setMessages((prev) => mergeMessages(prev, [local]));
-      enqueue(local.id, content);
+      enqueue(id, content);
     },
     [conversationId, myUserId, enqueue]
   );
 
-  const retry = useCallback(
-    (message: ChatMessage) => {
-      const again: ChatMessage = {
-        ...message,
-        status: "sending",
-        error: undefined,
-        created_at: new Date().toISOString(),
-      };
-      setMessages((prev) => mergeMessages(prev, [again]));
-      enqueue(message.id, message.content);
-    },
-    [enqueue]
-  );
+  const send = useCallback((content: string) => queueSend(crypto.randomUUID(), content), [queueSend]);
+  const retry = useCallback((m: ChatMessage) => queueSend(m.id, m.content), [queueSend]);
 
   useEffect(() => {
     const wasLive = prevConnectionRef.current === "live";
@@ -257,7 +244,7 @@ export function useMessages(conversationId: string, myUserId: string) {
     if (connection !== "live" || wasLive) return;
 
     for (const m of messagesRef.current) {
-      if (m.status === "failed" && m.error?.code === "NETWORK") {
+      if (m.status === "failed" && m.error.code === "NETWORK") {
         retry(m);
       }
     }

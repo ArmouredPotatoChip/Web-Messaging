@@ -119,7 +119,7 @@ export function MessagePanel({ conversationId, myUserId, otherUsername }: Props)
                     })}
                 </p>
               </div>
-              {m.status === "failed" && m.error && (
+              {m.status === "failed" && (
                 <ErrorNotice
                   variant="inline"
                   className="mt-1 max-w-[70%] text-right text-xs"
