@@ -3,14 +3,11 @@ import {
   getMessagesAfter,
   getMessagesBefore,
   MESSAGE_LIMIT,
-  sendMessages,
   subscribeToMessages,
   type Message,
 } from "./api";
 import { toAppError, type AppError } from "../../lib/errors";
-
-export type OutboxMessage = Message &
-  ({ status: "sending" } | { status: "failed"; error: AppError });
+import type { OutboxMessage, SubscribeToDelivered } from "./useOutbox";
 
 export type ChatMessage = (Message & { status: "sent" }) | OutboxMessage;
 
@@ -37,16 +34,17 @@ function toChatMessages(confirmed: Message[], outbox: OutboxMessage[]): ChatMess
 const CATCH_UP_OVERLAP_MS = 30_000;
 const CATCH_UP_MAX_PAGES = 5;
 
-export function useMessages(conversationId: string, myUserId: string) {
+export function useMessages(
+  conversationId: string,
+  outbox: OutboxMessage[],
+  subscribeToDelivered: SubscribeToDelivered
+) {
   const [confirmed, setConfirmed] = useState<Message[]>([]);
-  const [outbox, setOutbox] = useState<OutboxMessage[]>([]);
   const [error, setError] = useState<AppError | null>(null);
   const [loading, setLoading] = useState(true);
   const [attempt, setAttempt] = useState(0);
   const [reconnecting, setReconnecting] = useState(false);
-  const chainRef = useRef<Promise<void>>(Promise.resolve());
   const confirmedRef = useRef<Message[]>([]);
-  const outboxRef = useRef<OutboxMessage[]>([]);
   const loadedRef = useRef(false);
   const syncIdRef = useRef(0);
   const [hasMore, setHasMore] = useState(false);
@@ -58,8 +56,7 @@ export function useMessages(conversationId: string, myUserId: string) {
 
   useEffect(() => {
     confirmedRef.current = confirmed;
-    outboxRef.current = outbox;
-  }, [confirmed, outbox]);
+  }, [confirmed]);
 
   const reload = useCallback(async () => {
     const syncId = ++syncIdRef.current;
@@ -154,49 +151,11 @@ export function useMessages(conversationId: string, myUserId: string) {
     };
   }, [conversationId, attempt]);
 
-  const deliver = useCallback(
-    async (id: string, content: string) => {
-      try {
-        const stored = await sendMessages(id, conversationId, myUserId, content);
-        setConfirmed((prev) => mergeConfirmed(prev, [stored]));
-        setOutbox((prev) => prev.filter((m) => m.id !== id));
-      } catch (err) {
-        const appError = toAppError(err);
-        setOutbox((prev) =>
-          prev.map((m): OutboxMessage => (m.id === id ? { ...m, status: "failed", error: appError } : m))
-        );
-      }
-    },
-    [conversationId, myUserId]
-  );
-
-  const enqueue = useCallback(
-    (id: string, content: string) => {
-      chainRef.current = chainRef.current
-        .then(() => deliver(id, content))
-        .catch((err) => console.error("send chain:", err));
-    },
-    [deliver]
-  );
-
-  const queueSend = useCallback(
-    (id: string, content: string) => {
-      const local: OutboxMessage = {
-        id,
-        content,
-        conversation_id: conversationId,
-        sender_id: myUserId,
-        created_at: new Date().toISOString(),
-        status: "sending",
-      };
-      setOutbox((prev) => [...prev.filter((m) => m.id !== id), local]);
-      enqueue(id, content);
-    },
-    [conversationId, myUserId, enqueue]
-  );
-
-  const send = useCallback((content: string) => queueSend(crypto.randomUUID(), content), [queueSend]);
-  const retry = useCallback((m: ChatMessage) => queueSend(m.id, m.content), [queueSend]);
+  useEffect(() => {
+    return subscribeToDelivered(conversationId, (message) => {
+      setConfirmed((prev) => mergeConfirmed(prev, [message]));
+    });
+  }, [conversationId, subscribeToDelivered]);
 
   useEffect(() => {
     let cancelled = false;
@@ -221,11 +180,6 @@ export function useMessages(conversationId: string, myUserId: string) {
         reload().finally(() => {
           if (cancelled || !subscribed) return;
           setReconnecting(false);
-          for (const m of outboxRef.current) {
-            if (m.status === "failed" && m.error.code === "NETWORK") {
-              retry(m);
-            }
-          }
         });
       }
     );
@@ -234,7 +188,7 @@ export function useMessages(conversationId: string, myUserId: string) {
       syncIdRef.current++;
       unsubscribe();
     };
-  }, [conversationId, reload, retry]);
+  }, [conversationId, reload]);
 
   return {
     messages,
@@ -245,7 +199,5 @@ export function useMessages(conversationId: string, myUserId: string) {
     olderError,
     reload,
     loadOlder,
-    send,
-    retry,
   };
 }

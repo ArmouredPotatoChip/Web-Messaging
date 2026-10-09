@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { listConversations, type ConversationSummary, subscribeToNewConversations } from "./api";
 import { toAppError, type AppError } from "../../lib/errors";
 
-export function useConversations(myUserId: string) {
+export function useConversations(myUserId: string, onSubscribed: () => void) {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [error, setError] = useState<AppError | null>(null);
   const [loading, setLoading] = useState(true);
@@ -37,6 +37,7 @@ export function useConversations(myUserId: string) {
           setReconnecting(!subscribed);
           if (subscribed) {
             reload();
+            onSubscribed();
           }
         }
       }
@@ -45,7 +46,7 @@ export function useConversations(myUserId: string) {
       cancelled = true;
       unsubscribe();
     };
-  }, [myUserId, reload]);
+  }, [myUserId, reload, onSubscribed]);
 
   return { conversations, error, loading, reconnecting, reload };
 }

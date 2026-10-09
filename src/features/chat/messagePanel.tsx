@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
+import type { Message } from "./api";
 import { useMessages } from "./useMessages";
+import type { OutboxMessage, SubscribeToDelivered } from "./useOutbox";
 import { ErrorNotice } from "../../ErrorNotice";
 
 const AT_BOTTOM_PX = 40;
@@ -9,11 +11,15 @@ type Props = {
   conversationId: string;
   myUserId: string;
   otherUsername: string;
+  outbox: OutboxMessage[];
+  send: (conversationId: string, content: string) => void;
+  retry: (message: Message) => void;
+  subscribeToDelivered: SubscribeToDelivered;
 };
 
-export function MessagePanel({ conversationId, myUserId, otherUsername }: Props) {
-  const { messages, error, loading, reconnecting, loadingOlder, olderError, reload, loadOlder, send, retry } =
-    useMessages(conversationId, myUserId);
+export function MessagePanel({ conversationId, myUserId, otherUsername, outbox, send, retry, subscribeToDelivered }: Props) {
+  const { messages, error, loading, reconnecting, loadingOlder, olderError, reload, loadOlder } =
+    useMessages(conversationId, outbox, subscribeToDelivered);
   const [text, setText] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
   const prevLastIdRef = useRef<string | undefined>(undefined);
@@ -44,7 +50,7 @@ export function MessagePanel({ conversationId, myUserId, otherUsername }: Props)
     const wasAtBottom = fromBottomRef.current - el.clientHeight < AT_BOTTOM_PX;
 
     if (sentByMe || wasAtBottom) {
-      el.scrollTo({ top: el.scrollHeight, behavior: wasAtBottom && !wasEmpty ? "smooth" : "auto" });
+      el.scrollTo({ top: el.scrollHeight, behavior: wasAtBottom && !wasEmpty && !prepended ? "smooth" : "auto" });
       fromBottomRef.current = el.clientHeight;
       return;
     }
@@ -66,7 +72,7 @@ export function MessagePanel({ conversationId, myUserId, otherUsername }: Props)
     const content = text.trim();
     if (!content) return;
 
-    send(content);
+    send(conversationId, content);
     setText("");
   }
 
