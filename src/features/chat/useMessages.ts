@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getMessagesAfter,
   getMessagesBefore,
@@ -9,51 +9,44 @@ import {
 } from "./api";
 import { toAppError, type AppError } from "../../lib/errors";
 
-export type ChatMessage = Message &
-  ({ status: "sent" } | { status: "sending" } | { status: "failed"; error: AppError });
+export type OutboxMessage = Message &
+  ({ status: "sending" } | { status: "failed"; error: AppError });
 
-function toSent(message: Message): ChatMessage {
-  return { ...message, status: "sent" };
-}
+export type ChatMessage = (Message & { status: "sent" }) | OutboxMessage;
 
-function mergeMessages(current: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] {
+function mergeConfirmed(current: Message[], incoming: Message[]): Message[] {
   const byId = new Map(current.map((m) => [m.id, m]));
-  if (incoming.every((m) => byId.get(m.id)?.status === "sent")) return current;
+  if (incoming.every((m) => byId.has(m.id))) return current;
   for (const m of incoming) {
     byId.set(m.id, m);
   }
-  
-  return [...byId.values()].sort((a, b) => {
-    const aPending = a.status !== "sent";
-    const bPending = b.status !== "sent";
-    if (aPending !== bPending) return aPending ? 1 : -1;
-    return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-  });
+
+  return [...byId.values()].sort(
+    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+  );
+}
+
+function toChatMessages(confirmed: Message[], outbox: OutboxMessage[]): ChatMessage[] {
+  const confirmedIds = new Set(confirmed.map((m) => m.id));
+  return [
+    ...confirmed.map((m): ChatMessage => ({ ...m, status: "sent" })),
+    ...outbox.filter((m) => !confirmedIds.has(m.id)),
+  ];
 }
 
 const CATCH_UP_OVERLAP_MS = 30_000;
 const CATCH_UP_MAX_PAGES = 5;
 
-function newestConfirmedAt(messages: ChatMessage[]): string | null {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].status === "sent") return messages[i].created_at;
-  }
-  return null;
-}
-
-function oldestConfirmedAt(messages: ChatMessage[]): string | null {
-  const first = messages[0];
-  return first?.status === "sent" ? first.created_at : null;
-}
-
 export function useMessages(conversationId: string, myUserId: string) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [confirmed, setConfirmed] = useState<Message[]>([]);
+  const [outbox, setOutbox] = useState<OutboxMessage[]>([]);
   const [error, setError] = useState<AppError | null>(null);
   const [loading, setLoading] = useState(true);
   const [attempt, setAttempt] = useState(0);
   const [reconnecting, setReconnecting] = useState(false);
   const chainRef = useRef<Promise<void>>(Promise.resolve());
-  const messagesRef = useRef<ChatMessage[]>([]);
+  const confirmedRef = useRef<Message[]>([]);
+  const outboxRef = useRef<OutboxMessage[]>([]);
   const loadedRef = useRef(false);
   const syncIdRef = useRef(0);
   const [hasMore, setHasMore] = useState(false);
@@ -61,13 +54,16 @@ export function useMessages(conversationId: string, myUserId: string) {
   const [olderError, setOlderError] = useState<AppError | null>(null);
   const loadingOlderRef = useRef(false);
 
+  const messages = useMemo(() => toChatMessages(confirmed, outbox), [confirmed, outbox]);
+
   useEffect(() => {
-    messagesRef.current = messages;
-  }, [messages]);
+    confirmedRef.current = confirmed;
+    outboxRef.current = outbox;
+  }, [confirmed, outbox]);
 
   const reload = useCallback(async () => {
     const syncId = ++syncIdRef.current;
-    const cursor = newestConfirmedAt(messagesRef.current);
+    const cursor = confirmedRef.current[confirmedRef.current.length - 1]?.created_at;
 
     if (!cursor || !loadedRef.current) {
       setAttempt((n) => n + 1);
@@ -81,7 +77,7 @@ export function useMessages(conversationId: string, myUserId: string) {
       for (let page = 0; page < CATCH_UP_MAX_PAGES; page++) {
         const batch = await getMessagesAfter(conversationId, after);
         if (syncIdRef.current !== syncId) return;
-        setMessages((prev) => mergeMessages(prev, batch.map(toSent)));
+        setConfirmed((prev) => mergeConfirmed(prev, batch));
         if (batch.length < MESSAGE_LIMIT) return;
 
         const last = batch[batch.length - 1];
@@ -93,10 +89,10 @@ export function useMessages(conversationId: string, myUserId: string) {
       const latest = await getMessagesBefore(conversationId);
       if (syncIdRef.current !== syncId || latest.length === 0) return;
       const oldestKept = new Date(latest[0].created_at).getTime();
-      setMessages((prev) =>
-        mergeMessages(
-          prev.filter((m) => m.status !== "sent" || new Date(m.created_at).getTime() >= oldestKept),
-          latest.map(toSent)
+      setConfirmed((prev) =>
+        mergeConfirmed(
+          prev.filter((m) => new Date(m.created_at).getTime() >= oldestKept),
+          latest
         )
       );
       setHasMore(latest.length === MESSAGE_LIMIT);
@@ -108,7 +104,7 @@ export function useMessages(conversationId: string, myUserId: string) {
   }, [conversationId]);
 
   const loadOlder = useCallback(async () => {
-    const cursor = oldestConfirmedAt(messagesRef.current);
+    const cursor = confirmedRef.current[0]?.created_at;
     if (loadingOlderRef.current || !hasMore || !cursor) return;
 
     loadingOlderRef.current = true;
@@ -119,8 +115,8 @@ export function useMessages(conversationId: string, myUserId: string) {
       const page = await getMessagesBefore(conversationId, cursor);
       if (syncIdRef.current !== syncId) return;
 
-      const known = new Set(messagesRef.current.map((m) => m.id));
-      setMessages((prev) => mergeMessages(prev, page.map(toSent)));
+      const known = new Set(confirmedRef.current.map((m) => m.id));
+      setConfirmed((prev) => mergeConfirmed(prev, page));
       setHasMore(page.length === MESSAGE_LIMIT && page.some((m) => !known.has(m.id)));
     } catch (err) {
       setOlderError(toAppError(err));
@@ -140,7 +136,7 @@ export function useMessages(conversationId: string, myUserId: string) {
         if (!cancelled) {
           loadedRef.current = true;
           setHasMore(history.length === MESSAGE_LIMIT);
-          setMessages((prev) => mergeMessages(prev, history.map(toSent)));
+          setConfirmed((prev) => mergeConfirmed(prev, history));
         }
       })
       .catch((err) => {
@@ -162,13 +158,12 @@ export function useMessages(conversationId: string, myUserId: string) {
     async (id: string, content: string) => {
       try {
         const stored = await sendMessages(id, conversationId, myUserId, content);
-        setMessages((prev) => mergeMessages(prev, [toSent(stored)]));
+        setConfirmed((prev) => mergeConfirmed(prev, [stored]));
+        setOutbox((prev) => prev.filter((m) => m.id !== id));
       } catch (err) {
         const appError = toAppError(err);
-        setMessages((prev) =>
-          prev.map((m): ChatMessage =>
-            m.id === id && m.status === "sending" ? { ...m, status: "failed", error: appError } : m
-          )
+        setOutbox((prev) =>
+          prev.map((m): OutboxMessage => (m.id === id ? { ...m, status: "failed", error: appError } : m))
         );
       }
     },
@@ -186,7 +181,7 @@ export function useMessages(conversationId: string, myUserId: string) {
 
   const queueSend = useCallback(
     (id: string, content: string) => {
-      const local: ChatMessage = {
+      const local: OutboxMessage = {
         id,
         content,
         conversation_id: conversationId,
@@ -194,7 +189,7 @@ export function useMessages(conversationId: string, myUserId: string) {
         created_at: new Date().toISOString(),
         status: "sending",
       };
-      setMessages((prev) => mergeMessages(prev, [local]));
+      setOutbox((prev) => [...prev.filter((m) => m.id !== id), local]);
       enqueue(id, content);
     },
     [conversationId, myUserId, enqueue]
@@ -211,7 +206,7 @@ export function useMessages(conversationId: string, myUserId: string) {
       conversationId,
       (message) => {
         if (!cancelled) {
-          setMessages((prev) => mergeMessages(prev, [toSent(message)]));
+          setConfirmed((prev) => mergeConfirmed(prev, [message]));
         }
       },
       (isSubscribed) => {
@@ -226,7 +221,7 @@ export function useMessages(conversationId: string, myUserId: string) {
         reload().finally(() => {
           if (cancelled || !subscribed) return;
           setReconnecting(false);
-          for (const m of messagesRef.current) {
+          for (const m of outboxRef.current) {
             if (m.status === "failed" && m.error.code === "NETWORK") {
               retry(m);
             }
