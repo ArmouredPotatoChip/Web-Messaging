@@ -29,7 +29,6 @@ const AUTH_CODES: Record<string, ErrorCode> = {
   user_already_exists: "EMAIL_TAKEN",
   email_exists: "EMAIL_TAKEN",
   weak_password: "WEAK_PASSWORD",
-  unexpected_failure: "SIGNUP_FAILED",
   session_expired: "SESSION_EXPIRED",
   refresh_token_not_found: "SESSION_EXPIRED",
   over_request_rate_limit: "RATE_LIMITED",
@@ -42,6 +41,15 @@ const POSTGRES_CODES: Record<string, ErrorCode> = {
 };
 
 export type ErrorCode = keyof typeof CATALOG;
+
+export class CodedError extends Error {
+    constructor(
+        readonly code: ErrorCode,
+        readonly cause: unknown
+    ) {
+        super(code);
+    }
+}
 
 
 function field(err: unknown, name: string): string | undefined{
@@ -56,6 +64,10 @@ function detectCode(err: unknown): ErrorCode {
     const message = field(err, "message") ?? String(err);
     if(!navigator.onLine || /failed to fetch/i.test(message)){
         return "NETWORK";
+    }
+
+    if(err instanceof CodedError){
+        return err.code;
     }
 
     const hint = field(err, "hint");

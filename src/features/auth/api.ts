@@ -1,5 +1,6 @@
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "../../lib/supabase";
+import { CodedError } from "../../lib/errors";
 
 export async function signUp(email: string, password: string, username: string) {
     const { error } = await supabase.auth.signUp({
@@ -9,7 +10,7 @@ export async function signUp(email: string, password: string, username: string) 
     });
 
     if (error) {
-        if (error.status === 500) throw Object.assign(error, { hint: "SIGNUP_FAILED" });
+        if (error.status === 500) throw new CodedError("SIGNUP_FAILED", error);
         throw error;
     }
 }
