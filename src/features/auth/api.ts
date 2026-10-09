@@ -9,8 +9,6 @@ export async function signUp(email: string, password: string, username: string) 
     });
 
     if (error) {
-        // Supabase Auth returns 500 when the profile trigger fails (username taken
-        // or invalid). supabase-js drops the error code for 5xx, so tag it here.
         if (error.status === 500) throw Object.assign(error, { hint: "SIGNUP_FAILED" });
         throw error;
     }

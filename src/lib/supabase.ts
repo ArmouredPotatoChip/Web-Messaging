@@ -9,6 +9,5 @@ if (!url || !key) {
 }
 
 export const supabase = createClient<Database>(url, key, {
-  // Below the 25 s default so a dead connection is noticed within about 10 s.
   realtime: { heartbeatIntervalMs: 5000 },
 });

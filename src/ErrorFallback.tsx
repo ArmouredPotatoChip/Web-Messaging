@@ -1,4 +1,3 @@
-// The app tree is gone when this renders, so a full reload is the only safe restart.
 export function ErrorFallback() {
   return (
     <div className="fixed inset-0 flex items-center justify-center bg-black/40">

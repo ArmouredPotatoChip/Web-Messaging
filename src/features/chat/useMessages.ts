@@ -9,7 +9,6 @@ import {
 } from "./api";
 import { toAppError, type AppError } from "../../lib/errors";
 
-// status and error exist only in client state, never in the database.
 export type ChatMessage = Message & {
   status: "sent" | "sending" | "failed";
   error?: AppError;
@@ -34,11 +33,9 @@ function mergeMessages(current: ChatMessage[], incoming: ChatMessage[]): ChatMes
   });
 }
 
-// created_at is set when an insert starts, so a row can appear with an older timestamp.
 const CATCH_UP_OVERLAP_MS = 30_000;
 const CATCH_UP_MAX_PAGES = 5;
 
-// Local messages sort last and are skipped: their created_at is the client clock.
 function newestConfirmedAt(messages: ChatMessage[]): string | null {
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i].status === "sent") return messages[i].created_at;
@@ -46,7 +43,6 @@ function newestConfirmedAt(messages: ChatMessage[]): string | null {
   return null;
 }
 
-// Local messages sort last, so an unconfirmed first message means none is confirmed.
 function oldestConfirmedAt(messages: ChatMessage[]): string | null {
   const first = messages[0];
   return first?.status === "sent" ? first.created_at : null;
@@ -57,7 +53,6 @@ export function useMessages(conversationId: string, myUserId: string) {
   const [error, setError] = useState<AppError | null>(null);
   const [loading, setLoading] = useState(true);
   const [attempt, setAttempt] = useState(0);
-  // "connecting" is separate so the first join shows no banner.
   const [connection, setConnection] = useState<"connecting" | "live" | "reconnecting">("connecting");
   const chainRef = useRef<Promise<void>>(Promise.resolve());
   const messagesRef = useRef<ChatMessage[]>([]);
@@ -67,7 +62,6 @@ export function useMessages(conversationId: string, myUserId: string) {
   const [hasMore, setHasMore] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [olderError, setOlderError] = useState<AppError | null>(null);
-  // State updates are not immediate; the ref blocks a second request in the same tick.
   const loadingOlderRef = useRef(false);
 
   useEffect(() => {
@@ -99,7 +93,6 @@ export function useMessages(conversationId: string, myUserId: string) {
         after = last.created_at;
       }
 
-      // Too far behind, restart from the latest page
       const latest = await getMessagesBefore(conversationId);
       if (syncIdRef.current !== syncId || latest.length === 0) return;
       const oldestKept = new Date(latest[0].created_at).getTime();
@@ -109,7 +102,6 @@ export function useMessages(conversationId: string, myUserId: string) {
           latest.map(toSent)
         )
       );
-      // Older messages were just dropped.
       setHasMore(latest.length === MESSAGE_LIMIT);
     } catch (err) {
       if (syncIdRef.current === syncId) {
@@ -118,7 +110,6 @@ export function useMessages(conversationId: string, myUserId: string) {
     }
   }, [conversationId]);
 
-  // Drops its page if a resync ran meanwhile: after a cap reset it would leave a hole.
   const loadOlder = useCallback(async () => {
     const cursor = oldestConfirmedAt(messagesRef.current);
     if (loadingOlderRef.current || !hasMore || !cursor) return;
@@ -133,7 +124,6 @@ export function useMessages(conversationId: string, myUserId: string) {
 
       const known = new Set(messagesRef.current.map((m) => m.id));
       setMessages((prev) => mergeMessages(prev, page.map(toSent)));
-      // A full page of rows we already have would otherwise loop forever.
       setHasMore(page.length === MESSAGE_LIMIT && page.some((m) => !known.has(m.id)));
     } catch (err) {
       setOlderError(toAppError(err));
@@ -155,7 +145,6 @@ export function useMessages(conversationId: string, myUserId: string) {
         }
       },
       (isSubscribed) => {
-        // Removing the channel in cleanup reports "not subscribed" too.
         if (cancelled) return;
         subscribed = isSubscribed;
 
@@ -164,7 +153,6 @@ export function useMessages(conversationId: string, myUserId: string) {
           setConnection("reconnecting");
           return;
         }
-        // Missed events are not replayed; "live" waits for the catch-up so the banner covers it.
         reload().finally(() => {
           if (!cancelled && subscribed) {
             setConnection("live");

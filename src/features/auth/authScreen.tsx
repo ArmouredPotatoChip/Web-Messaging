@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { isUsernameAvailable, signIn, signUp } from "./api";
 import { toAppError, type AppError } from "../../lib/errors";
+import { ErrorNotice } from "../../ErrorNotice";
 
 export function AuthScreen() {
   const [mode, setMode] = useState<"signin" | "signup">("signin");
@@ -89,15 +90,14 @@ export function AuthScreen() {
 
         {inputError && <p className="text-sm text-red-600">{inputError}</p>}
         {error && (
-          <div className="text-sm text-red-600">
-            <p className="font-medium">{mode === "signin" ? "Couldn't sign in" : "Couldn't sign up"}</p>
-            <p>{error.message}</p>
-            {error.retryable && (
-              <button type="button" onClick={submit} disabled={busy} className="underline disabled:opacity-50">
-                Try again
-              </button>
-            )}
-          </div>
+          <ErrorNotice
+            variant="inline"
+            className="text-sm"
+            context={mode === "signin" ? "Couldn't sign in" : "Couldn't sign up"}
+            error={error}
+            onRetry={submit}
+            busy={busy}
+          />
         )}
 
         <button

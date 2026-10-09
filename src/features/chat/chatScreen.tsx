@@ -5,6 +5,7 @@ import { Sidebar } from "./sideBar";
 import { useConversations } from "./useConversations";
 import { MessagePanel} from "./messagePanel";
 import { toAppError, type AppError } from "../../lib/errors";
+import { ErrorNotice } from "../../ErrorNotice";
 
 type Props = {
   myUserId: string;
@@ -50,15 +51,14 @@ const selected = conversations.find((c) => c.id === selectedId) ?? null;
           onRetry={reload}
         />
         {signOutError && (
-          <div className="border-r border-t bg-white p-3 text-xs text-red-600">
-            <p className="font-medium">Couldn't sign out</p>
-            <p>{signOutError.message}</p>
-            {signOutError.retryable && (
-              <button onClick={handleSignOut} disabled={signingOut} className="underline disabled:opacity-50">
-                Try again
-              </button>
-            )}
-          </div>
+          <ErrorNotice
+            variant="inline"
+            className="border-r border-t bg-white p-3 text-xs"
+            context="Couldn't sign out"
+            error={signOutError}
+            onRetry={handleSignOut}
+            busy={signingOut}
+          />
         )}
         <button
           onClick={handleSignOut}

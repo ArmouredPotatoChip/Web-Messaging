@@ -33,10 +33,8 @@ export function useConversations(myUserId: string) {
         reload();
       },
       (subscribed) => {
-        // Removing the channel in cleanup reports "not subscribed" too.
         if (!cancelled) {
           setConnection(subscribed ? "live" : "reconnecting");
-          // Events missed while disconnected are not replayed, so refetch the list.
           if (subscribed) {
             reload();
           }

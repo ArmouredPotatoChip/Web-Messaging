@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { useMessages } from "./useMessages";
+import { ErrorNotice } from "../../ErrorNotice";
 
 const AT_BOTTOM_PX = 40;
 const LOAD_OLDER_WITHIN_PX = 200;
@@ -17,20 +18,17 @@ export function MessagePanel({ conversationId, myUserId, otherUsername }: Props)
   const listRef = useRef<HTMLDivElement>(null);
   const prevLastIdRef = useRef<string | undefined>(undefined);
   const prevFirstIdRef = useRef<string | undefined>(undefined);
-  // Measured from the bottom, because that distance survives messages being added above.
   const fromBottomRef = useRef(0);
 
   function handleScroll() {
     const el = listRef.current;
     if (!el) return;
     fromBottomRef.current = el.scrollHeight - el.scrollTop;
-    // After a failed load, only "Try again" retries.
     if (el.scrollTop < LOAD_OLDER_WITHIN_PX && !olderError) {
       loadOlder();
     }
   }
 
-  // Before paint, so a corrected position is never seen as a jump.
   useLayoutEffect(() => {
     const el = listRef.current;
     if (!el) return;
@@ -46,7 +44,6 @@ export function MessagePanel({ conversationId, myUserId, otherUsername }: Props)
     const wasAtBottom = fromBottomRef.current - el.clientHeight < AT_BOTTOM_PX;
 
     if (sentByMe || wasAtBottom) {
-      // Smooth only from the bottom: a long smooth scroll would pass through the load zone.
       el.scrollTo({ top: el.scrollHeight, behavior: wasAtBottom && !wasEmpty ? "smooth" : "auto" });
       fromBottomRef.current = el.clientHeight;
       return;
@@ -54,11 +51,9 @@ export function MessagePanel({ conversationId, myUserId, otherUsername }: Props)
     if (prepended) {
       el.scrollTop = el.scrollHeight - fromBottomRef.current;
     }
-    // A message added below changes the height without a scroll event.
     fromBottomRef.current = el.scrollHeight - el.scrollTop;
   }, [messages, myUserId]);
 
-  // A page that does not fill the panel produces no scroll event.
   useEffect(() => {
     const el = listRef.current;
     if (el && el.scrollTop < LOAD_OLDER_WITHIN_PX && !olderError) {
@@ -71,7 +66,6 @@ export function MessagePanel({ conversationId, myUserId, otherUsername }: Props)
     const content = text.trim();
     if (!content) return;
 
-    // No await or catch: send() shows the message at once and tracks its own status.
     send(content);
     setText("");
   }
@@ -94,15 +88,7 @@ export function MessagePanel({ conversationId, myUserId, otherUsername }: Props)
         </p>
 
         {olderError && (
-          <div className="rounded border border-red-200 bg-red-50 p-3 text-sm">
-            <p className="font-medium text-red-700">Couldn't load older messages</p>
-            <p className="text-red-600">{olderError.message}</p>
-            {olderError.retryable && (
-              <button onClick={loadOlder} disabled={loadingOlder} className="mt-2 text-red-700 underline disabled:opacity-50">
-                Try again
-              </button>
-            )}
-          </div>
+          <ErrorNotice variant="box" context="Couldn't load older messages" error={olderError} onRetry={loadOlder} busy={loadingOlder} />
         )}
 
         {loading && messages.length === 0 && (
@@ -110,15 +96,7 @@ export function MessagePanel({ conversationId, myUserId, otherUsername }: Props)
         )}
 
         {error && (
-          <div className="rounded border border-red-200 bg-red-50 p-3 text-sm">
-            <p className="font-medium text-red-700">Couldn't load messages</p>
-            <p className="text-red-600">{error.message}</p>
-            {error.retryable && (
-              <button onClick={reload} disabled={loading} className="mt-2 text-red-700 underline disabled:opacity-50">
-                Try again
-              </button>
-            )}
-          </div>
+          <ErrorNotice variant="box" context="Couldn't load messages" error={error} onRetry={reload} busy={loading} />
         )}
 
         {messages.map((m) => {
@@ -141,16 +119,14 @@ export function MessagePanel({ conversationId, myUserId, otherUsername }: Props)
                     })}
                 </p>
               </div>
-              {m.status === "failed" && (
-                <div className="mt-1 max-w-[70%] text-right text-xs text-red-600">
-                  <p className="font-medium">Couldn't send</p>
-                  <p>{m.error?.message}</p>
-                  {m.error?.retryable && (
-                    <button type="button" onClick={() => retry(m)} className="underline">
-                      Retry
-                    </button>
-                  )}
-                </div>
+              {m.status === "failed" && m.error && (
+                <ErrorNotice
+                  variant="inline"
+                  className="mt-1 max-w-[70%] text-right text-xs"
+                  context="Couldn't send"
+                  error={m.error}
+                  onRetry={() => retry(m)}
+                />
               )}
             </div>
           );

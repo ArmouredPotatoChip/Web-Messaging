@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import type { ConversationSummary } from "./api";
 import { toAppError, type AppError } from "../../lib/errors";
+import { ErrorNotice } from "../../ErrorNotice";
 
 type Props = {
   conversations: ConversationSummary[];
@@ -64,15 +65,7 @@ export function Sidebar({ conversations, selectedId, onSelect, onStart, loadErro
         </div>
         {inputError && <p className="text-xs text-red-600">{inputError}</p>}
         {error && (
-          <div className="text-xs text-red-600">
-            <p className="font-medium">Couldn't start conversation</p>
-            <p>{error.message}</p>
-            {error.retryable && (
-              <button type="button" onClick={start} disabled={busy} className="underline disabled:opacity-50">
-                Try again
-              </button>
-            )}
-          </div>
+          <ErrorNotice variant="inline" className="text-xs" context="Couldn't start conversation" error={error} onRetry={start} busy={busy} />
         )}
       </form>
 
@@ -82,14 +75,8 @@ export function Sidebar({ conversations, selectedId, onSelect, onStart, loadErro
 
       <ul className="flex-1 overflow-y-auto">
         {loadError && (
-          <li className="m-3 rounded border border-red-200 bg-red-50 p-3 text-sm">
-            <p className="font-medium text-red-700">Couldn't load conversations</p>
-            <p className="text-red-600">{loadError.message}</p>
-            {loadError.retryable && (
-              <button onClick={onRetry} disabled={loading} className="mt-2 text-red-700 underline disabled:opacity-50">
-                Try again
-              </button>
-            )}
+          <li className="m-3">
+            <ErrorNotice variant="box" context="Couldn't load conversations" error={loadError} onRetry={onRetry} busy={loading} />
           </li>
         )}
 

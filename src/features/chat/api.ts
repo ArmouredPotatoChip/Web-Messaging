@@ -36,7 +36,6 @@ export async function startConversation(username: string): Promise<string> {
   return data;
 }
 
-// The cursor row is included: rows sharing its timestamp would be skipped otherwise.
 export async function getMessagesBefore(conversationId: string, before?: string): Promise<Message[]> {
     let query = supabase
         .from("messages")
@@ -57,7 +56,6 @@ export async function getMessagesBefore(conversationId: string, before?: string)
     return data.reverse();
 }
 
-// The cursor row is included: rows sharing its timestamp would be skipped otherwise.
 export async function getMessagesAfter(conversationId: string, after: string): Promise<Message[]> {
     const { data, error } = await supabase
         .from("messages")
@@ -65,7 +63,6 @@ export async function getMessagesAfter(conversationId: string, after: string): P
         .eq("conversation_id", conversationId)
         .gte("created_at", after)
         .order("created_at", {ascending: true})
-        // Keeps the order stable when two messages share a timestamp.
         .order("id", {ascending: true})
         .limit(MESSAGE_LIMIT);
 
@@ -109,7 +106,6 @@ export function subscribeToMessages(
 ): () => void {
   const channel = supabase
     .channel(`messages:${conversationId}`, {
-      // Holds SUBSCRIBED until the server is streaming, so the catch-up cannot run too early.
       config: { postgres_changes_options: { wait: true } },
     })
     .on(
