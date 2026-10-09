@@ -51,12 +51,11 @@ export function useMessages(conversationId: string, myUserId: string) {
   const [error, setError] = useState<AppError | null>(null);
   const [loading, setLoading] = useState(true);
   const [attempt, setAttempt] = useState(0);
-  const [connection, setConnection] = useState<"connecting" | "live" | "reconnecting">("connecting");
+  const [reconnecting, setReconnecting] = useState(false);
   const chainRef = useRef<Promise<void>>(Promise.resolve());
   const messagesRef = useRef<ChatMessage[]>([]);
   const loadedRef = useRef(false);
   const syncIdRef = useRef(0);
-  const prevConnectionRef = useRef(connection);
   const [hasMore, setHasMore] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [olderError, setOlderError] = useState<AppError | null>(null);
@@ -133,40 +132,6 @@ export function useMessages(conversationId: string, myUserId: string) {
 
   useEffect(() => {
     let cancelled = false;
-    let subscribed = false;
-
-    const unsubscribe = subscribeToMessages(
-      conversationId,
-      (message) => {
-        if (!cancelled) {
-          setMessages((prev) => mergeMessages(prev, [toSent(message)]));
-        }
-      },
-      (isSubscribed) => {
-        if (cancelled) return;
-        subscribed = isSubscribed;
-
-        if (!isSubscribed) {
-          syncIdRef.current++;
-          setConnection("reconnecting");
-          return;
-        }
-        reload().finally(() => {
-          if (!cancelled && subscribed) {
-            setConnection("live");
-          }
-        });
-      }
-    );
-    return () => {
-      cancelled = true;
-      syncIdRef.current++;
-      unsubscribe();
-    };
-  }, [conversationId, reload]);
-
-  useEffect(() => {
-    let cancelled = false;
 
     setLoading(true);
     setError(null);
@@ -239,22 +204,48 @@ export function useMessages(conversationId: string, myUserId: string) {
   const retry = useCallback((m: ChatMessage) => queueSend(m.id, m.content), [queueSend]);
 
   useEffect(() => {
-    const wasLive = prevConnectionRef.current === "live";
-    prevConnectionRef.current = connection;
-    if (connection !== "live" || wasLive) return;
+    let cancelled = false;
+    let subscribed = false;
 
-    for (const m of messagesRef.current) {
-      if (m.status === "failed" && m.error.code === "NETWORK") {
-        retry(m);
+    const unsubscribe = subscribeToMessages(
+      conversationId,
+      (message) => {
+        if (!cancelled) {
+          setMessages((prev) => mergeMessages(prev, [toSent(message)]));
+        }
+      },
+      (isSubscribed) => {
+        if (cancelled) return;
+        subscribed = isSubscribed;
+
+        if (!isSubscribed) {
+          syncIdRef.current++;
+          setReconnecting(true);
+          return;
+        }
+        reload().finally(() => {
+          if (cancelled || !subscribed) return;
+          setReconnecting(false);
+          for (const m of messagesRef.current) {
+            if (m.status === "failed" && m.error.code === "NETWORK") {
+              retry(m);
+            }
+          }
+        });
       }
-    }
-  }, [connection, retry]);
+    );
+    return () => {
+      cancelled = true;
+      syncIdRef.current++;
+      unsubscribe();
+    };
+  }, [conversationId, reload, retry]);
 
   return {
     messages,
     error,
     loading,
-    reconnecting: connection === "reconnecting",
+    reconnecting,
     loadingOlder,
     olderError,
     reload,

@@ -6,7 +6,7 @@ export function useConversations(myUserId: string) {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [error, setError] = useState<AppError | null>(null);
   const [loading, setLoading] = useState(true);
-  const [connection, setConnection] = useState<"connecting" | "live" | "reconnecting">("connecting");
+  const [reconnecting, setReconnecting] = useState(false);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -34,7 +34,7 @@ export function useConversations(myUserId: string) {
       },
       (subscribed) => {
         if (!cancelled) {
-          setConnection(subscribed ? "live" : "reconnecting");
+          setReconnecting(!subscribed);
           if (subscribed) {
             reload();
           }
@@ -47,5 +47,5 @@ export function useConversations(myUserId: string) {
     };
   }, [myUserId, reload]);
 
-  return { conversations, error, loading, reconnecting: connection === "reconnecting", reload };
+  return { conversations, error, loading, reconnecting, reload };
 }
