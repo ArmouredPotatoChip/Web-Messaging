@@ -2,6 +2,8 @@ import { useState, type FormEvent } from "react";
 import type { ConversationSummary } from "./api";
 import { toAppError, type AppError } from "../../lib/errors";
 import { ErrorNotice } from "../../ErrorNotice";
+import { Menu } from "../../Menu";
+import { SignOutButton } from "../auth/signOutButton";
 
 type Props = {
   conversations: ConversationSummary[];
@@ -46,7 +48,7 @@ export function Sidebar({ conversations, selectedId, onSelect, onStart, loadErro
   }
 
   return (
-    <aside className="flex w-64 flex-col border-r bg-white">
+    <aside className="flex w-64 shrink-0 flex-col border-r bg-white">
       <form onSubmit={handleSubmit} className="space-y-2 border-b p-3">
         <div className="flex gap-2">
           <input
@@ -68,6 +70,10 @@ export function Sidebar({ conversations, selectedId, onSelect, onStart, loadErro
           <ErrorNotice variant="inline" className="text-xs" context="Couldn't start conversation" error={error} onRetry={start} busy={busy} />
         )}
       </form>
+
+      <Menu label="Menu">
+        <SignOutButton />
+      </Menu>
 
       {reconnecting && (
         <p className="border-b bg-amber-50 px-3 py-1 text-xs text-amber-800">Reconnecting...</p>

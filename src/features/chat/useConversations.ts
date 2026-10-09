@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { listConversations, type ConversationSummary, subscribeToNewConversations } from "./api";
 import { toAppError, type AppError } from "../../lib/errors";
 
@@ -8,15 +8,24 @@ export function useConversations(myUserId: string, onSubscribed: () => void) {
   const [loading, setLoading] = useState(true);
   const [reconnecting, setReconnecting] = useState(false);
 
+  const reloadIdRef = useRef(0);
+
   const reload = useCallback(async () => {
+    const reloadId = ++reloadIdRef.current;
     setLoading(true);
     try {
-      setConversations(await listConversations(myUserId));
+      const list = await listConversations(myUserId);
+      if (reloadIdRef.current !== reloadId) return;
+      setConversations(list);
       setError(null);
     } catch (err) {
-      setError(toAppError(err));
+      if (reloadIdRef.current === reloadId) {
+        setError(toAppError(err));
+      }
     } finally {
-      setLoading(false);
+      if (reloadIdRef.current === reloadId) {
+        setLoading(false);
+      }
     }
   }, [myUserId]);
 
