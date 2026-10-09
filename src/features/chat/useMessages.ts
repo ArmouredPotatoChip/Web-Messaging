@@ -21,6 +21,7 @@ function toSent(message: Message): ChatMessage {
 
 function mergeMessages(current: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] {
   const byId = new Map(current.map((m) => [m.id, m]));
+  if (incoming.every((m) => byId.get(m.id)?.status === "sent")) return current;
   for (const m of incoming) {
     byId.set(m.id, m);
   }
@@ -209,11 +210,8 @@ export function useMessages(conversationId: string, myUserId: string) {
   const deliver = useCallback(
     async (id: string, content: string) => {
       try {
-        const result = await sendMessages(id, conversationId, myUserId, content);
-        if (result === "already_stored") {
-          const latest = await getMessagesBefore(conversationId);
-          setMessages((prev) => mergeMessages(prev, latest.map(toSent)));
-        }
+        const stored = await sendMessages(id, conversationId, myUserId, content);
+        setMessages((prev) => mergeMessages(prev, [toSent(stored)]));
       } catch (err) {
         const appError = toAppError(err);
         setMessages((prev) =>

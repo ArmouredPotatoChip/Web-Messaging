@@ -74,22 +74,31 @@ export async function getMessagesAfter(conversationId: string, after: string): P
     return data;
 }
 
+const UNIQUE_VIOLATION = "23505";
+
 export async function sendMessages(
     id: string,
     conversationId: string,
     senderId: string,
     content: string
-): Promise<"inserted" | "already_stored"> {
-    const {error} = await supabase.from("messages").insert({
-        id,
-        conversation_id: conversationId,
-        sender_id: senderId,
-        content,
-    });
-    // 23505 = an earlier attempt with this id already stored the message.
-    if (error?.code === "23505") return "already_stored";
-    if (error) throw error;
-    return "inserted";
+): Promise<Message> {
+    const { data, error } = await supabase
+        .from("messages")
+        .insert({
+            id,
+            conversation_id: conversationId,
+            sender_id: senderId,
+            content,
+        })
+        .select()
+        .single();
+
+    if (!error) return data;
+    if (error.code !== UNIQUE_VIOLATION) throw error;
+
+    const stored = await supabase.from("messages").select("*").eq("id", id).single();
+    if (stored.error) throw stored.error;
+    return stored.data;
 }
 
 
